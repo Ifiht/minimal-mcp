@@ -36,17 +36,17 @@ async def main():
         raw_tools = await mcp_client.list_tools()
         tools = []
         messages = []
+        # Convert MCP to OpenAI tool format
         for tool_obj in raw_tools:
             tool_dict = convert_tool_obj(tool_obj)
             tools.append({"type": "function", "function": tool_dict})
-
         # print(raw_tools) # use for debugging
         # print(json.dumps(tools, indent=2)) # use for debugging
         print(f"Successfully retrieved {len(tools)} tools.")
         print("--- Streamlined LLM Chat Client ---")
         print("Type 'quit' or 'exit' to end the conversation.")
         print("-----------------------------------")
-
+        # LLM & MCP Loop
         while True:
             #----> 1) Get user input
             user_input = input("\nYou: ")
@@ -62,53 +62,54 @@ async def main():
                 tool_choice="auto",
                 #stream=True
             )
-
             response_message = response.choices[0].message
             tool_calls = response_message.tool_calls
-
+            #----> 3) Process tool calls
             if tool_calls:
                 messages.append(response_message)
 
-                for tool_call in tool_calls:
-                    function_name = tool_call.function.name
-                    function_args = json.loads(tool_call.function.arguments)
-
-                    print(f"--- LLM called tool: {function_name} with args {function_args} ---")
-
-                    tool_result = await mcp_client.call_tool(
-                        function_name,
-                        function_args
-                    )
-
-                    print(f"--- MCP Server Response: {tool_result} ---")
-
-                    tool_output_str = ""
-                    if isinstance(tool_result, list) and len(tool_result) > 0:
-                        if hasattr(tool_result[0], 'text'):
-                            tool_output_str = str(tool_result[0].text)
+                while tool_calls:
+                    for tool_call in tool_calls:
+                        function_name = tool_call.function.name
+                        function_args = json.loads(tool_call.function.arguments)
+                        # tool has been called, get the results:
+                        print(f"--- LLM called tool: {function_name} with args {function_args} ---")
+                        tool_result = await mcp_client.call_tool(
+                            function_name,
+                            function_args
+                        )
+                        print(f"--- MCP Server Response: {tool_result} ---")
+                        # need to extract the string from the result obj
+                        tool_output_str = ""
+                        if isinstance(tool_result, list) and len(tool_result) > 0:
+                            if hasattr(tool_result[0], 'text'):
+                                tool_output_str = str(tool_result[0].text)
+                            else:
+                                tool_output_str = str(tool_result[0])
                         else:
-                            tool_output_str = str(tool_result[0])
-                    else:
-                        tool_output_str = str(tool_result)
+                            tool_output_str = str(tool_result)
+                        # add the result to our message log
+                        messages.append({
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "name": function_name,
+                            "content": tool_output_str,
+                        })
+                    # setup the next loop
+                    next_response = llm_client.chat.completions.create(
+                        model="Wayland",  # doesn't matter for llama.cpp
+                        messages=messages,
+                    )
+                    response_message = next_response.choices[0].message
+                    tool_calls = response_message.tool_calls
 
-                    messages.append({
-                        "tool_call_id": tool_call.id,
-                        "role": "tool",
-                        "name": function_name,
-                        "content": tool_output_str,
-                    })
-
-                second_response = llm_client.chat.completions.create(
-                    model="Wayland",  # doesn't matter for llama.cpp
-                    messages=messages,
-                )
-                final_response = second_response.choices[0].message.content
+                final_response = next_response.choices[0].message.content
                 print(f"Assistant: {final_response}")
                 messages.append({
                     "role": "assistant",
                     "content": final_response,
                 })
-
+            #----> 4) no (more) tool calls, send user the response
             else:
                 final_response = response_message.content
                 print(f"Assistant: {final_response}")

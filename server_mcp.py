@@ -24,6 +24,6 @@ def ls(directory: str) -> str:
 if __name__ == "__main__":
     print("--- Starting FastMCP Tool Server ---")
     print("The 'add' tool is now available for the LLM.")
-    print("Server running on http://localhost:8000")
+    print("Server running on http://localhost:8001")
     print("------------------------------------")
     server.run(transport="http", host="127.0.0.1", port=8001, path="/mcp")
